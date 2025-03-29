@@ -15,8 +15,8 @@ const Sidebar = () => {
         <div className="flex flex-col gap-4">
           <MainLogo />
           <CustomCursorThemeToggle
-            lightImageSrc="/images/light.png"
-            darkImageSrc="/images/dark.png"
+            lightImageSrc="/images/light.webp"
+            darkImageSrc="/images/dark.webp"
           />
           <Search />
         </div>
