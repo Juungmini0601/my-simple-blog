@@ -1,0 +1,126 @@
+---
+title: Dispathcer Servlet Internal
+description: 디스패처 서블릿의 내부 구조를 살펴보자.
+date: "2025-03-30"
+keywords: [디스패처 서블릿, Spring MVC, Java]
+thumbnail: "/images/posts/Tech/dispatcher-servlet-internal/thumbnail.png"
+---
+
+# 디스패처 서블릿이란?
+
+<figure>
+    <img src="/images/posts/Tech/dispatcher-servlet-internal/thumbnail.png" alt="디스패처 서블릿" width={'100%'} />
+    <figcaption>출처: https://yongnyeo.tistory.com/60</figcaption>
+</figure>
+
+**디스패처 서블릿(DispatcherServlet)** 은 HTTP 프로토콜로 들어오는 모든 요청을 가장 먼저 받아들이는 프론트 컨트롤러(Front Controller) 역할을 합니다. <br/>
+클라이언트의 요청을 적절한 컨트롤러에 위임하며, 요청 처리 과정에서 반복적으로 수행되는 `공통 작업`(예: 로깅, 인증, 인코딩 설정 등)을 중앙에서 처리합니다.
+이를 통해 개발자는 개별 컨트롤러에서 비즈니스 로직과 관련된 핵심 코드만 작성하면 되므로, 어플리케이션 개발이 보다 효율적이고 일관성 있게 이루어질 수 있습니다.<br/>
+
+> 이번 글에서는 스프링 MVC의 핵심 컴포넌트인 디스패처 서블릿의 상속 구조와 요청 처리 방식을 살펴보겠습니다.
+
+## 상속 계층도
+
+<figure>
+    <img src="/images/posts/Tech/dispatcher-servlet-internal/dispathcer-extend.png" alt="디스패처 서블릿 상속 계층도" width={'100%'} />
+    <figcaption>Dispathcer Servlet 상속 계층도</figcaption>
+</figure>
+
+DispatcherServlet의 동작 과정을 이해하기 위해 상속 구조를 살펴보면, `HttpServlet`과 `FrameworkServlet`을 상속받고 있는 것을 확인할 수 있습니다.
+HttpServlet은 우리가 잘 알고 있는, HTTP 기반의 웹 서버를 만들기 위한 자바의 표준 서블릿 클래스입니다.
+반면 FrameworkServlet은 Spring에서 각 서블릿마다 개별적인 WebApplicationContext를 생성하고 주입하기 위한 클래스로, Spring MVC의 기반이 되는 핵심 클래스 중 하나입니다.
+실제로는 HttpServletBean과 GenericServlet도 상속 계층에 포함되어 있지만, DispatcherServlet의 핵심 기능을 이해하는 데에는 앞서 언급한 `HttpServlet`, `FrameworkServlet`, `DispatcherServlet` 이 세 가지 클래스만 파악해도 충분합니다.
+
+## Dispathcer Servlet이 요청을 처리하는 과정
+
+### FrameworkServlet service()
+
+<figure>
+    <img src="/images/posts/Tech/dispatcher-servlet-internal/step1.png" alt="FrameworkServlet service()" width={'100%'} />
+    <figcaption>HTTP Method가 Servlet Spec에서 지원하는지 확인</figcaption>
+</figure>
+
+Servlet은 요청이 들어오면 service() 메서드를 이용하여 클라이언트의 요청을 처리합니다.
+
+DispatcherServlet은 HttpServlet에서 제공하는 service() 메서드를 직접 오버라이드하지 않습니다. 따라서 요청이 들어오면 부모 클래스인 `FrameworkServlet의 service()` 메서드가 호출되며, 이 메서드가 `DispatcherServlet의 처리 흐름의 시작점`이 됩니다.
+
+FrameworkServlet의 service() 메서드는 서블릿에서 공식적으로 지원하지 않는 메서드(예: PATCH)에 대한 처리를 위해 별도의 분기 로직을 포함하고 있습니다. 이러한 비표준 메서드도 Spring MVC 차원에서 유연하게 처리할 수 있도록 하기 위함입니다.
+
+반면, GET, POST, PUT, DELETE 등 서블릿에 구현된 표준 메서드에 해당하는 요청의 경우, FrameworkServlet은 이를 HttpServlet의 기본 구현에 따라 적절한 doGet(), doPost() 등의 메서드로 위임하며 서블릿 스펙에 구현되지 않은 메소드의 경우 processRequest 메서드를 통해서 지원합니다.
+
+### HttpServlet service()
+
+<figure>
+    <img src="/images/posts/Tech/dispatcher-servlet-internal/step2.png" alt="HttpServlet service()" width={'100%'} />
+    <figcaption>HttpServlet service</figcaption>
+</figure>
+
+HttpServlet의 service() 메서드는 HTTP Method에 맞는 `doXXX()` 메소드를 호출합니다.
+
+### Locale, Request 전처리 후 DispatcherServlet 호출
+
+<figure>
+    <img src="/images/posts/Tech/dispatcher-servlet-internal/step3.png" alt="Locale, Request 전처리 후 DispatcherServlet 호출" width={'100%'} />
+    <figcaption>Locale 전처리 후 Dispatcher Servlet 호출</figcaption>
+</figure>
+
+doXXX() 메서드는 내부적으로 `processRequest()` 메서드를 호출하여 요청을 처리합니다.
+processRequest()는 요청 객체와 함께 Locale 설정등의 공통적인 작업을 수행한 후 doService() 메서드를 호출하여 실질적인 요청 처리를 `DispatcherServlet`으로 위임합니다.
+요청을 위임받은 `DispatcherServlet`은 Web Application Context Setting, Locale Resolver 등록 등의 작업을 수행하고 doDispatch 메소드를 호출합니다.
+
+### DispatcherServlet의 핵심 doDispatch
+
+#### Handler 요청
+
+<figure>
+    <img src="/images/posts/Tech/dispatcher-servlet-internal/step4.png" alt="Handler Request" width={'100%'} />
+    <figcaption>Handler Request</figcaption>
+</figure>
+
+가장 먼저 수행하는 작업은 `HandlerMapping` 목록에서 현재 요청을 처리할 수 있는 HandlerMapping을 찾는 것입니다.
+최근 Spring MVC에서 일반적으로 사용되는 `@RequestMapping`, `@GetMapping`등으로 정의된 컨트롤러 메서드를 처리할 수 있는 `RequestMappingHandlerMapping`이 반환됩니다.
+
+`RequestMappingHandlerMapping`은 내부적으로 요청정보와 사전에 등록된 매핑 정보를 비교하여 해당 요청을 처리할 수 있는 `Handler`와 함께 적용될 `Interceptor` 목록을 포함한 `HandlerExecutionChain`을 반환합니다.
+
+#### Handler Adapter 요청
+
+<figure>
+    <img src="/images/posts/Tech/dispatcher-servlet-internal/step5.png" alt="Handler Request" width={'100%'} />
+    <figcaption>Handler Adapter Request</figcaption>
+</figure>
+
+`HandlerExecutionChain`에서 추출한 정보를 기반으로 핸들러를 실행할 수 있는 적절한 `HandlerAdapter`를 찾습니다.
+Spring MVC는 다양한 타입의 핸들러를 일관된 방식으로 처리하기 위하여 `HandlerAdapter`를 통해 핸들러 실행 방식을 추상화한 구조를 가지고 있습니다.
+
+#### Handler handle
+
+<figure>
+    <img src="/images/posts/Tech/dispatcher-servlet-internal/step6.png" alt="Handler Request" width={'100%'} />
+    <figcaption>Handler handle</figcaption>
+</figure>
+HandlerAdapter가 선택되고 나면, 요청은 HandlerExecutionChain에 포함된 핸들러에 위임됩니다.
+이때 RequestMappingHandlerAdapter는 내부적으로 **ServletInvocableHandlerMethod**를 사용하여, 해당 메서드의 **리플렉션 정보(Method)** 와 Bean 인스턴스를 이용해 실제 컨트롤러 메서드를 호출합니다.
+호출 결과는 Model과 View 정보를 함께 담은 ModelAndView 객체로 반환되며, 이후 뷰 렌더링 단계에서 사용됩니다.
+
+#### View Resolver
+
+<figure>
+    <img src="/images/posts/Tech/dispatcher-servlet-internal/step7.png" alt="Handler Request" width={'100%'} />
+    <figcaption>View Resolver</figcaption>
+</figure>
+
+DispatcherServlet은 컨트롤러에서 반환된 ModelAndView 객체를 기반으로, ViewResolver를 통해 렌더링 가능한 View 객체를 찾습니다.
+타임리프(Thymeleaf)를 사용하는 경우, **ThymeleafViewResolver**가 등록되어 있으므로 viewName에 해당하는 **타임리프 뷰(HTML 템플릿)** 가 매핑되어 반환됩니다.
+반환된 View 객체는 이후 render() 메서드를 통해 모델 데이터와 함께 최종 결과 HTML을 생성하게 되며, 이를 클라이언트에게 응답으로 전송합니다.
+
+### 정리
+
+1. 클라이언트 요청 → DispatcherServlet
+2. HandlerMapping → HandlerExecutionChain 획득
+3. HandlerAdapter → 컨트롤러 실행
+4. 컨트롤러 → ModelAndView 반환
+5. ViewResolver → View 획득
+6. View → render() → 최종 HTML 응답
+
+### 참고자료
+https://mangkyu.tistory.com/216
